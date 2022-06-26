@@ -1,0 +1,89 @@
+---
+title: ' Practical Machine Learning - Prediction Assignment Writeup'
+author: "Shresth Juyal"
+date: "2/06/2022"
+output:
+  html_document: default
+  word_document: default
+---
+## Introduction 
+
+This is a Prediction Assignment Writeup for the Coursera course "Practical Machine Learning". This report will attempt to preduct  the classe variable in the training set, which will then be very verified by the testing set. This report will explain how I built the model and also show the expected sample error. In the end, I will use my predication model to preduct 20 test cases given in the test case file. 
+
+## Loading Libraries 
+```{r}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(kernlab)
+library(rattle)
+library(corrplot)
+set.seed(4234)
+```
+
+
+## Importing Data sets and Cleaning Data Set
+#### After loading the csv files, I will atempt the clean the data set by removing certain varialbes which have no significance and will not contribute to my prediction model.
+```{r}
+training_set = read.csv("/Users/shresthjuyal/data/pml-training.csv")
+test_set = read.csv("/Users/shresthjuyal/data/pml-testing.csv")
+
+dim(test_set)
+
+
+training_set = training_set[,colMeans(is.na(training_set)) < .9] 
+training_set = training_set[,-c(1:7)] 
+
+zerovariance = nearZeroVar(training_set)
+training_set <- training_set[,-zerovariance]
+dim(training_set)
+
+inTrain = createDataPartition(y=training_set$classe, p=0.7, list=F)
+train = training_set[inTrain,]
+valid = training_set[-inTrain,]
+```
+
+## Creating Decision Tree 
+```{r} 
+control = trainControl(method="cv", number=3, verboseIter=F)
+
+decision_tree <- train(classe~., data=train, method="rpart", trControl = control, tuneLength = 5)
+fancyRpartPlot(decision_tree$finalModel)
+```
+
+The decision tree indicates that the 'A' is the best model to make with .41 .18 .18 .16 and .06. 
+
+## Creating First Prediction Model 
+```{r}
+pred_trees = predict(decision_tree, valid)
+cmtrees = confusionMatrix(pred_trees, factor(valid$classe))
+cmtrees
+
+mod = train(classe~., data=train, method="rf", trControl = control, tuneLength = 5)
+
+tree_prediction <- predict(mod, valid)
+tree <- confusionMatrix(tree_prediction, factor(valid$classe))
+tree
+```
+
+## Creating Second Prediction Model 
+```{r}
+second <- train(classe~., data=train, method="gbm", trControl = control, tuneLength = 5, verbose = F)
+
+second_prediction <- predict(second, valid)
+plot_second <- confusionMatrix(second_prediction, factor(valid$classe))
+plot_second
+```
+
+Our first prediction model is the best because its has a .99 accuracy and the lowest sample error of 0.04. This should be a good enough model to predict the 'classe' variable and test our 20 test cases. 
+
+
+```{r}
+predicted <- predict(mod, test_set)
+print(predicted)
+
+correlation = cor(train[, -length(names(train))])
+corrplot(correlation, method="color")
+```
+
+My prediction for my 20 test cases is {r print(pred)}

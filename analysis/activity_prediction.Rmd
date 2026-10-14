@@ -1,0 +1,128 @@
+---
+title: "Predicting Exercise Quality from Wearable Sensor Data"
+author: "Shresth Juyal"
+date: "2022-06-25"
+output:
+  html_document: default
+---
+
+## Introduction
+
+Six participants performed barbell lifts while wearing accelerometers on the belt, forearm, arm and dumbbell. Each lift was done one correct way (class **A**) and four common incorrect ways (classes **B–E**). The goal is to predict the `classe` variable from the sensor readings. This report compares three models, estimates the out-of-sample error on a held-out validation set, and predicts 20 unlabeled test cases.
+
+## Libraries
+
+```{r setup, message=FALSE, warning=FALSE}
+library(caret)
+library(rattle)
+library(corrplot)
+set.seed(4234)
+```
+
+## Loading and cleaning the data
+
+The data files are downloaded on first run.
+
+```{r load}
+dir.create("data", showWarnings = FALSE)
+base_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+for (f in c("pml-training.csv", "pml-testing.csv")) {
+  path <- file.path("data", f)
+  if (!file.exists(path)) download.file(paste0(base_url, f), path)
+}
+
+training_set <- read.csv("data/pml-training.csv")
+test_set     <- read.csv("data/pml-testing.csv")
+dim(training_set)
+dim(test_set)
+```
+
+Three cleaning steps reduce 160 columns to 53:
+
+1. Drop columns that are more than 90% missing. These are summary statistics recorded only once per time window.
+2. Drop the first seven columns: row ID, participant name, timestamps and window indicators. They identify a recording rather than describe the movement, and would leak information.
+3. Drop near-zero-variance predictors.
+
+```{r clean}
+training_set <- training_set[, colMeans(is.na(training_set)) < 0.9]
+training_set <- training_set[, -c(1:7)]
+
+zero_var <- nearZeroVar(training_set)
+training_set <- training_set[, -zero_var]
+dim(training_set)
+```
+
+A 70/30 stratified split creates a validation set for estimating out-of-sample error.
+
+```{r split}
+in_train <- createDataPartition(y = training_set$classe, p = 0.7, list = FALSE)
+train <- training_set[in_train, ]
+valid <- training_set[-in_train, ]
+```
+
+## Model 1: Decision tree
+
+All models use 3-fold cross-validation for tuning.
+
+```{r tree}
+control <- trainControl(method = "cv", number = 3, verboseIter = FALSE)
+
+decision_tree <- train(classe ~ ., data = train, method = "rpart",
+                       trControl = control, tuneLength = 5)
+fancyRpartPlot(decision_tree$finalModel)
+
+cm_tree <- confusionMatrix(predict(decision_tree, valid), factor(valid$classe))
+cm_tree
+```
+
+A single tree reaches only about 55% accuracy. It struggles to separate the four incorrect techniques (B–D).
+
+## Model 2: Random forest
+
+```{r rf}
+rf_model <- train(classe ~ ., data = train, method = "rf",
+                  trControl = control, tuneLength = 5)
+
+cm_rf <- confusionMatrix(predict(rf_model, valid), factor(valid$classe))
+cm_rf
+```
+
+## Model 3: Gradient boosting
+
+```{r gbm}
+gbm_model <- train(classe ~ ., data = train, method = "gbm",
+                   trControl = control, tuneLength = 5, verbose = FALSE)
+
+cm_gbm <- confusionMatrix(predict(gbm_model, valid), factor(valid$classe))
+cm_gbm
+```
+
+## Model selection
+
+```{r compare}
+data.frame(
+  model    = c("Decision tree", "Random forest", "Gradient boosting"),
+  accuracy = c(cm_tree$overall["Accuracy"], cm_rf$overall["Accuracy"],
+               cm_gbm$overall["Accuracy"]),
+  oos_error = 1 - c(cm_tree$overall["Accuracy"], cm_rf$overall["Accuracy"],
+                    cm_gbm$overall["Accuracy"])
+)
+```
+
+The **random forest** performs best, with about 99.3% validation accuracy. That gives an expected out-of-sample error of about **0.7%**, so it is used for the final predictions.
+
+## Predictor correlations
+
+```{r corr, fig.width=9, fig.height=9}
+correlation <- cor(train[, -ncol(train)])
+corrplot(correlation, method = "color", tl.cex = 0.5, tl.col = "black")
+```
+
+## Predictions on the 20 test cases
+
+```{r predict}
+predicted <- predict(rf_model, test_set)
+predicted
+```
+
+The random forest predicts: `r paste(predicted, collapse = " ")`.
